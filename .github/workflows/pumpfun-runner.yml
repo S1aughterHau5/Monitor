@@ -1,0 +1,146 @@
+name: PumpFun runner
+
+# This repo exists for one reason: GitHub Actions minutes are billed on
+# whichever repo a workflow RUNS in, and public repos get unlimited free
+# minutes on GitHub-hosted runners. All the actual code, trading
+# strategy, and trade data live in the PRIVATE repo
+# (S1aughterHau5/Claude, PumpFun/ directory) -- this workflow just checks
+# that code out, runs one cycle of it, and pushes the results straight
+# back. This repo holds no trading logic of its own; it's a free compute
+# + scheduling shell around the real project.
+#
+# Console output from the actual trading cycle is deliberately
+# suppressed below (redirected to a file, only surfaced if something
+# fails) -- the channel owner asked to keep this public repo's own
+# Actions log minimal, 2026-09-15.
+#
+# Self-dispatch chain, same pattern as (and directly copied from) the
+# private repo's own pumpfun-mechanical-cycle.yml -- see that file's
+# header for the full reasoning on why a plain `schedule` cron alone
+# isn't relied on for cadence.
+#
+# IMPORTANT: only ONE of {this workflow, the private repo's own
+# pumpfun-mechanical-cycle.yml} should ever be the active chain at a
+# time -- both would write to the same wallet.json in the private repo,
+# and running both concurrently would race and corrupt that state. The
+# private repo's own workflow is paused (2026-09-15, Actions-minutes
+# emergency stop) specifically so this one can be the sole driver.
+#
+# Requires one repository secret here, PUMPFUN_PRIVATE_REPO_TOKEN: a
+# fine-grained GitHub personal access token scoped to ONLY
+# S1aughterHau5/Claude, with "Contents: Read and write" permission and
+# nothing else -- see that repo's PumpFun/README.md for the exact setup
+# steps. This token can never touch any other repository, public or
+# private, even though it lives as a secret in this public one. GitHub
+# Actions automatically redacts any registered secret value from every
+# log line, and this workflow never echoes it directly -- only ever
+# references it inside the `with:`/`Authorization:` fields below.
+
+on:
+  schedule:
+    - cron: '3,13,23,33,43,53 * * * *' # redundant backstop only -- see the private repo's own workflow header for why this alone isn't reliable
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write # needed only to self-dispatch this same workflow (this repo's own GITHUB_TOKEN, never the private-repo secret)
+
+concurrency:
+  group: pumpfun-runner
+  cancel-in-progress: false
+
+jobs:
+  run-cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the private repo (source of truth for all code and data)
+        uses: actions/checkout@v4
+        with:
+          repository: S1aughterHau5/Claude
+          token: ${{ secrets.PUMPFUN_PRIVATE_REPO_TOKEN }}
+          path: private-repo
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run unit tests (output suppressed unless they fail)
+        working-directory: private-repo/PumpFun
+        run: |
+          set +e
+          npm test > test-output.log 2>&1
+          code=$?
+          set -e
+          if [ $code -ne 0 ]; then
+            echo "::error::Tests failed -- tail of output:"
+            tail -n 80 test-output.log
+          fi
+          exit $code
+
+      - name: Run mechanical cycle (output suppressed unless it fails)
+        working-directory: private-repo/PumpFun
+        run: |
+          set +e
+          npm run run-mechanical-cycle > cycle-output.log 2>&1
+          code=$?
+          set -e
+          if [ $code -ne 0 ]; then
+            echo "::error::Mechanical cycle failed -- tail of output:"
+            tail -n 80 cycle-output.log
+          fi
+          exit $code
+        env:
+          STARTING_BALANCE_USD: '500'
+          BUY_USD: '5'
+          MAX_CONCURRENT_POSITIONS: '5'
+          MAX_NEW_POSITIONS_PER_CYCLE: '2'
+
+      - name: Commit and push results back to the private repo
+        if: always()
+        # if: always() so a failed cycle still commits/pushes whatever
+        # log output exists, and -- more importantly -- so the
+        # self-dispatch step below still runs and the chain doesn't die
+        # on one bad tick (same reasoning as the private repo's own copy
+        # of this pattern).
+        working-directory: private-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PumpFun/data/ PumpFun/Logs/
+          git diff --cached --quiet && echo "No new results to commit." && exit 0
+          git commit -m "pumpfun: mechanical cycle (via Monitor runner) - $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          for i in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              echo "Pushed successfully (attempt $i)."
+              exit 0
+            fi
+            echo "Push rejected (attempt $i) -- another run pushed first. Rebasing onto the fresh remote head and retrying."
+            git fetch origin main
+            git rebase origin/main
+            sleep $((i * 2))
+          done
+          echo "::error::Failed to push results after 5 attempts."
+          exit 1
+
+      - name: Self-dispatch next tick
+        if: always()
+        # Sustains the cadence, exactly like the private repo's own
+        # workflow -- see that file's header for the full "why
+        # self-dispatch" reasoning. Uses THIS repo's own GITHUB_TOKEN
+        # (Monitor's, not the private-repo secret) since it only ever
+        # calls Monitor's own workflow_dispatch endpoint.
+        run: |
+          sleep 15
+          HTTP_CODE=$(curl -sS -o /tmp/dispatch_resp.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/pumpfun-runner.yml/dispatches" \
+            -d '{"ref":"main"}')
+          if [ "$HTTP_CODE" = "204" ]; then
+            echo "Self-dispatched next tick successfully (HTTP 204)."
+          else
+            echo "::warning::Self-dispatch for next tick returned HTTP $HTTP_CODE (expected 204): $(cat /tmp/dispatch_resp.json)"
+          fi
