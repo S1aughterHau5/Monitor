@@ -35,10 +35,30 @@ name: PumpFun runner
 # Actions automatically redacts any registered secret value from every
 # log line, and this workflow never echoes it directly -- only ever
 # references it inside the `with:`/`Authorization:` fields below.
+#
+# PAUSED 2026-09-16 -- channel owner: "Paper trading should be paused
+# before running the pilot." Both the real 5-coin pilot
+# (pumpfun-live-cycle.yml, in the private repo) and this paper cycle hit
+# the SAME free public Solana RPC endpoint, and a live dry run already
+# showed real contention between them (a wall of 429 "Too many
+# requests" errors during a dry-run scan while this chain kept running
+# alongside it) -- pausing this removes that contention entirely while
+# the pilot runs, and keeps the two systems' activity impossible to
+# conflate while real money is involved. Same pause technique already
+# used elsewhere in this project (comment out BOTH the `schedule:`
+# block AND the actual dispatch logic in "Self-dispatch next tick"
+# below, leave both commented, don't delete) -- cancelling in-progress
+# runs alone does not stop a self-rechaining workflow. To resume: un-
+# comment both blocks and manually workflow_dispatch once to restart
+# the chain.
 
 on:
-  schedule:
-    - cron: '3,13,23,33,43,53 * * * *' # redundant backstop only -- see the private repo's own workflow header for why this alone isn't reliable
+  # schedule: disabled 2026-09-16 -- see the "Self-dispatch next tick"
+  # step below for why (paused so the real 5-coin pilot doesn't have to
+  # share the free public RPC with the paper cycle). Left commented, not
+  # deleted, to restore easily.
+  # schedule:
+  #   - cron: '3,13,23,33,43,53 * * * *'
   workflow_dispatch: {}
 
 permissions:
@@ -142,21 +162,25 @@ jobs:
 
       - name: Self-dispatch next tick
         if: always()
-        # Sustains the cadence, exactly like the private repo's own
-        # workflow -- see that file's header for the full "why
-        # self-dispatch" reasoning. Uses THIS repo's own GITHUB_TOKEN
-        # (Monitor's, not the private-repo secret) since it only ever
-        # calls Monitor's own workflow_dispatch endpoint.
+        # PAUSED 2026-09-16 -- channel owner: "Paper trading should be
+        # paused before running the pilot." See this workflow's header
+        # for the full reasoning (RPC contention with the real 5-coin
+        # pilot, real 429s already observed). Dispatch logic left
+        # commented, not deleted, for an easy restore -- same convention
+        # every other pause in this project uses. Cancelling in-progress
+        # runs alone does not stop a self-rechaining workflow; this step
+        # must stop re-dispatching itself.
         run: |
-          sleep 15
-          HTTP_CODE=$(curl -sS -o /tmp/dispatch_resp.json -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/pumpfun-runner.yml/dispatches" \
-            -d '{"ref":"main"}')
-          if [ "$HTTP_CODE" = "204" ]; then
-            echo "Self-dispatched next tick successfully (HTTP 204)."
-          else
-            echo "::warning::Self-dispatch for next tick returned HTTP $HTTP_CODE (expected 204): $(cat /tmp/dispatch_resp.json)"
-          fi
+          echo "Self-dispatch is paused (paper trading paused while the real 5-coin pilot runs, 2026-09-16) -- see this step's own comment for why and how to restore."
+        # sleep 15
+        # HTTP_CODE=$(curl -sS -o /tmp/dispatch_resp.json -w "%{http_code}" -X POST \
+        #   -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+        #   -H "Accept: application/vnd.github+json" \
+        #   -H "Content-Type: application/json" \
+        #   "https://api.github.com/repos/${{ github.repository }}/actions/workflows/pumpfun-runner.yml/dispatches" \
+        #   -d '{"ref":"main"}')
+        # if [ "$HTTP_CODE" = "204" ]; then
+        #   echo "Self-dispatched next tick successfully (HTTP 204)."
+        # else
+        #   echo "::warning::Self-dispatch for next tick returned HTTP $HTTP_CODE (expected 204): $(cat /tmp/dispatch_resp.json)"
+        # fi
