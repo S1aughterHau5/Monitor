@@ -66,6 +66,22 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install dependencies
+        # Added 2026-09-16 -- this step never existed before because
+        # PumpFun had zero npm dependencies until that date. The channel
+        # owner's real on-chain quoted fills feature (@solana/web3.js,
+        # @pump-fun/pump-sdk) and the live SOL-transfer utility (bs58)
+        # both added real dependencies, and this workflow's next several
+        # dozen runs failed immediately with ERR_MODULE_NOT_FOUND for
+        # '@solana/web3.js' because node_modules was never installed --
+        # a real outage, not a hypothetical: it silently broke the whole
+        # paper-trading pipeline for over an hour before being caught.
+        # npm ci (not npm install) -- deterministic from
+        # PumpFun/package-lock.json, which the private repo now commits
+        # for exactly this reason.
+        working-directory: private-repo/PumpFun
+        run: npm ci
+
       - name: Run unit tests (output suppressed unless they fail)
         working-directory: private-repo/PumpFun
         run: |
