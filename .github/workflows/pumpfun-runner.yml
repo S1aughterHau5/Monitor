@@ -36,7 +36,12 @@ name: PumpFun runner
 # log line, and this workflow never echoes it directly -- only ever
 # references it inside the `with:`/`Authorization:` fields below.
 #
-# PAUSED 2026-09-16 -- channel owner: "Paper trading should be paused
+# RESUMED 2026-09-17 -- channel owner stopped live trading (real losses,
+# see the private repo's own live-cycle history) and asked to restart
+# paper trading: "Start paper trading...reset slots...$500 starting
+# wallet. 0.03 sol per trade." The RPC-contention reason this was paused
+# for (2026-09-16, below) no longer applies with live trading stopped.
+# Was PAUSED 2026-09-16 -- channel owner: "Paper trading should be paused
 # before running the pilot." Both the real 5-coin pilot
 # (pumpfun-live-cycle.yml, in the private repo) and this paper cycle hit
 # the SAME free public Solana RPC endpoint, and a live dry run already
@@ -44,21 +49,16 @@ name: PumpFun runner
 # requests" errors during a dry-run scan while this chain kept running
 # alongside it) -- pausing this removes that contention entirely while
 # the pilot runs, and keeps the two systems' activity impossible to
-# conflate while real money is involved. Same pause technique already
-# used elsewhere in this project (comment out BOTH the `schedule:`
-# block AND the actual dispatch logic in "Self-dispatch next tick"
-# below, leave both commented, don't delete) -- cancelling in-progress
-# runs alone does not stop a self-rechaining workflow. To resume: un-
-# comment both blocks and manually workflow_dispatch once to restart
-# the chain.
+# conflate while real money is involved. If live trading is ever resumed
+# again while this is still active, re-pause this the same way (comment
+# out BOTH the `schedule:` block AND the actual dispatch logic in
+# "Self-dispatch next tick" below, leave both commented, don't delete) --
+# cancelling in-progress runs alone does not stop a self-rechaining
+# workflow.
 
 on:
-  # schedule: disabled 2026-09-16 -- see the "Self-dispatch next tick"
-  # step below for why (paused so the real 5-coin pilot doesn't have to
-  # share the free public RPC with the paper cycle). Left commented, not
-  # deleted, to restore easily.
-  # schedule:
-  #   - cron: '3,13,23,33,43,53 * * * *'
+  schedule:
+    - cron: '3,13,23,33,43,53 * * * *'
   workflow_dispatch: {}
 
 permissions:
@@ -130,6 +130,7 @@ jobs:
         env:
           STARTING_BALANCE_USD: '500'
           BUY_USD: '5'
+          BUY_SOL: '0.03' # channel owner, 2026-09-17: "0.03 sol per trade" -- overrides BUY_USD above, see run-mechanical-cycle.js's own header on this var
           MAX_CONCURRENT_POSITIONS: '5'
           MAX_NEW_POSITIONS_PER_CYCLE: '2'
 
@@ -162,25 +163,19 @@ jobs:
 
       - name: Self-dispatch next tick
         if: always()
-        # PAUSED 2026-09-16 -- channel owner: "Paper trading should be
-        # paused before running the pilot." See this workflow's header
-        # for the full reasoning (RPC contention with the real 5-coin
-        # pilot, real 429s already observed). Dispatch logic left
-        # commented, not deleted, for an easy restore -- same convention
-        # every other pause in this project uses. Cancelling in-progress
-        # runs alone does not stop a self-rechaining workflow; this step
-        # must stop re-dispatching itself.
+        # RESUMED 2026-09-17 -- see this workflow's own header. Same
+        # self-dispatch chain pattern as the private repo's own
+        # pumpfun-live-cycle.yml/pumpfun-mechanical-cycle.yml.
         run: |
-          echo "Self-dispatch is paused (paper trading paused while the real 5-coin pilot runs, 2026-09-16) -- see this step's own comment for why and how to restore."
-        # sleep 15
-        # HTTP_CODE=$(curl -sS -o /tmp/dispatch_resp.json -w "%{http_code}" -X POST \
-        #   -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-        #   -H "Accept: application/vnd.github+json" \
-        #   -H "Content-Type: application/json" \
-        #   "https://api.github.com/repos/${{ github.repository }}/actions/workflows/pumpfun-runner.yml/dispatches" \
-        #   -d '{"ref":"main"}')
-        # if [ "$HTTP_CODE" = "204" ]; then
-        #   echo "Self-dispatched next tick successfully (HTTP 204)."
-        # else
-        #   echo "::warning::Self-dispatch for next tick returned HTTP $HTTP_CODE (expected 204): $(cat /tmp/dispatch_resp.json)"
-        # fi
+          sleep 15
+          HTTP_CODE=$(curl -sS -o /tmp/dispatch_resp.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/pumpfun-runner.yml/dispatches" \
+            -d '{"ref":"main"}')
+          if [ "$HTTP_CODE" = "204" ]; then
+            echo "Self-dispatched next tick successfully (HTTP 204)."
+          else
+            echo "::warning::Self-dispatch for next tick returned HTTP $HTTP_CODE (expected 204): $(cat /tmp/dispatch_resp.json)"
+          fi
