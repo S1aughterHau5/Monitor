@@ -133,6 +133,34 @@ jobs:
           BUY_SOL: '0.03' # channel owner, 2026-09-17: "0.03 sol per trade" -- overrides BUY_USD above, see run-mechanical-cycle.js's own header on this var
           MAX_CONCURRENT_POSITIONS: '5'
           MAX_NEW_POSITIONS_PER_CYCLE: '2'
+          # Dedicated Alchemy RPCs, added 2026-09-17 -- channel owner:
+          # "History and BuySell are clear to go if you want to rotate to
+          # ease the heavier lifting rpc calls... Review every RPC call
+          # and update to one of these to lighten the load and reduce
+          # our errors." Paper trading previously had NO dedicated key at
+          # all (fell back to the free public Solana RPC endpoint,
+          # lib/solanaRpc.js's own default) -- real data from
+          # data/rpc-metrics.json showed 30% of all calls failing with
+          # HTTP 429 as a direct result, 84% of them from this cycle's
+          # own scan_candidate_distribution walk specifically (the
+          # heaviest RPC consumer in the project). Split across two keys
+          # now: ALCHEMY_API_WORKER for everything else (matches the
+          # rename live trading's own SOLANA_RPC_URL now uses, so scan
+          # traffic stays consistent across paper/live), and the
+          # DISTRIBUTION-walk-specific SOLANA_RPC_URL_DISTRIBUTION on its
+          # OWN key (ALCHEMY_API_HISTORY) -- deliberately a DIFFERENT key
+          # from live trading's own distribution split
+          # (ALCHEMY_API_SWAPPER, see pumpfun-live-cycle.yml in the
+          # private repo), so paper and live never contend with each
+          # other on this heaviest-volume call either, even when both
+          # run at once. WORKER/HISTORY/SWAPPER are the channel owner's
+          # own personal Alchemy keys, confirmed dormant/unused before
+          # this. Never ALCHEMY_API_PRICESOCKET -- that one is the SAME
+          # underlying key as monitor mode's own ALCHEMY_API_RESEARCH
+          # (channel owner's own words: "do not use PriceSocket as its
+          # the same as research").
+          SOLANA_RPC_URL: https://solana-mainnet.g.alchemy.com/v2/${{ secrets.ALCHEMY_API_WORKER }}
+          SOLANA_RPC_URL_DISTRIBUTION: https://solana-mainnet.g.alchemy.com/v2/${{ secrets.ALCHEMY_API_HISTORY }}
 
       - name: Commit and push results back to the private repo
         if: always()
