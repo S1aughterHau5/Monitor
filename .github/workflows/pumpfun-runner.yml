@@ -131,8 +131,7 @@ jobs:
           STARTING_BALANCE_USD: '500'
           BUY_USD: '5'
           BUY_SOL: '0.03' # channel owner, 2026-09-17: "0.03 sol per trade" -- overrides BUY_USD above, see run-mechanical-cycle.js's own header on this var
-          MAX_CONCURRENT_POSITIONS: '5'
-          MAX_NEW_POSITIONS_PER_CYCLE: '2'
+          MAX_CONCURRENT_POSITIONS: '10' # channel owner, 2026-09-20: "Open slots to 10" -- was '5', silently overriding run-mechanical-cycle.js's own default
           # Dedicated Alchemy RPCs, added 2026-09-17 -- channel owner:
           # "History and BuySell are clear to go if you want to rotate to
           # ease the heavier lifting rpc calls... Review every RPC call
@@ -183,7 +182,20 @@ jobs:
             fi
             echo "Push rejected (attempt $i) -- another run pushed first. Rebasing onto the fresh remote head and retrying."
             git fetch origin main
-            git rebase origin/main
+            if ! git rebase origin/main; then
+              # A conflicting rebase leaves the working tree full of literal
+              # conflict markers. Under `bash -e` a bare failed `git rebase`
+              # here would kill this whole step immediately (no retry, no
+              # abort), and worse -- the NEXT commit/push step's `git add`
+              # would happily stage that conflicted content as if it were
+              # valid, corrupting data/ and Logs/ in the private repo. Same
+              # bug class already fixed in monitor/processingWorker.js and
+              # discoveryWorker.js's own commitLoop(); abort and let this
+              # cycle's results drop rather than push corrupted state.
+              echo "::warning::Rebase conflict on attempt $i -- aborting rebase, this cycle's results will not be pushed."
+              git rebase --abort
+              break
+            fi
             sleep $((i * 2))
           done
           echo "::error::Failed to push results after 5 attempts."
