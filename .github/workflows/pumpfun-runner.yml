@@ -36,6 +36,15 @@ name: PumpFun runner
 # log line, and this workflow never echoes it directly -- only ever
 # references it inside the `with:`/`Authorization:` fields below.
 #
+# PAUSED 2026-09-22 -- channel owner: "Stop the pump fun trading bot.
+# Stop everything." Same procedure this workflow's own history already
+# documents below: both the schedule: trigger AND the actual dispatch
+# logic in "Self-dispatch next tick" are commented/cut, left in place
+# rather than deleted, so resuming is a straight revert of this commit
+# plus a manual workflow_dispatch. Cancelling an in-progress run alone
+# does not stop a self-rechaining workflow -- that's why both places are
+# touched, not just one.
+#
 # RESUMED 2026-09-17 -- channel owner stopped live trading (real losses,
 # see the private repo's own live-cycle history) and asked to restart
 # paper trading: "Start paper trading...reset slots...$500 starting
@@ -57,8 +66,8 @@ name: PumpFun runner
 # workflow.
 
 on:
-  schedule:
-    - cron: '3,13,23,33,43,53 * * * *'
+  # schedule: (commented -- see "PAUSED 2026-09-22" above)
+  #   - cron: '3,13,23,33,43,53 * * * *'
   workflow_dispatch: {}
 
 permissions:
@@ -203,10 +212,15 @@ jobs:
 
       - name: Self-dispatch next tick
         if: always()
-        # RESUMED 2026-09-17 -- see this workflow's own header. Same
-        # self-dispatch chain pattern as the private repo's own
-        # pumpfun-live-cycle.yml/pumpfun-mechanical-cycle.yml.
         run: |
+          # PAUSED -- channel owner, 2026-09-22: "Stop the pump fun
+          # trading bot. Stop everything." Only the forever-chain that
+          # starts NEW cycles is cut here; nothing else in this workflow
+          # was touched. To resume, revert this commit (which also
+          # restores the schedule: trigger above) and manually
+          # workflow_dispatch this workflow.
+          echo "Self-dispatch disabled -- paper trading was explicitly stopped by the channel owner. Not starting another cycle."
+          exit 0
           sleep 15
           HTTP_CODE=$(curl -sS -o /tmp/dispatch_resp.json -w "%{http_code}" -X POST \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
